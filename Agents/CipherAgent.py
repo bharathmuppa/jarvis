@@ -1,8 +1,10 @@
-from aiagents import get_gpt4_response
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from llm_providers.openai_provider import OpenAIProvider
 from neo4j import GraphDatabase
 from neo4j.exceptions import CypherSyntaxError
-from loggers import prettyPrintJson
-from py2neo import Graph, Node, Relationship
+from py2neo import Graph
 
 node_properties_query = """
 CALL apoc.meta.data()
@@ -115,6 +117,10 @@ class Neo4jGPTQuery:
         self.schema = self.generate_schema()
 
     def construct_cypher(self, question, history=None):
+        # Initialize OpenAI provider
+        openai_provider = OpenAIProvider()
+        openai_provider.initialize()
+        
         messages = [
             {"role": "system", "content": self.get_system_message()},
             {"role": "user", "content": question},
@@ -122,19 +128,21 @@ class Neo4jGPTQuery:
         # Used for Cypher healing flows
         if history:
             messages.extend(history)
-        return get_gpt4_response(messages)      
+            
+        response = openai_provider.get_response(messages)
+        return response.content if response.success else "Error generating Cypher query"      
     def run(self, question, history=None, retry=True):
         # Construct Cypher statement
         cypher = self.construct_cypher(question, history)
         print(cypher)
-        return cypher
+        
         try:
             return self.query_database(cypher)
         # If Cypher syntax error
         except CypherSyntaxError as e:
             # If out of retries
             if not retry:
-             return "Invalid Cypher syntax"
+                return "Invalid Cypher syntax"
             # Self-healing Cypher flow by
             # providing specific error to GPT-4
             print("Retrying")
